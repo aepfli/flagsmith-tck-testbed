@@ -124,7 +124,12 @@ JSON string.
 ## 11. Variant is unpopulatable, and 10 scenarios depend on it — *runtime*
 
 The largest single cause of failure in the first real run: 10 of 12 failing scenarios fail with
-`variant was ""`.
+`variant was ""`. Full outcome, out of 40 scenarios: **17 passed, 12 failed, 11 skipped**.
+
+(`go test` prints 28 PASS lines, but 11 of those are the skipped scenarios -- godog skips them and
+the Go subtest still passes. Reading that 28 as the conformance result is exactly the vacuous-pass
+mistake the capability gating exists to prevent, and it was made once already in the first write-up
+of this file.)
 
 Flagsmith has no variant concept for a standard feature. A feature state is `enabled` plus
 `feature_state_value` and nothing names the value; the Edge Proxy's `map_flag_result_to_response_data`
@@ -160,8 +165,8 @@ through `GetFloatValue`. The two defects lock each other in place.
 
 ## 13. Both engines agree exactly — *runtime, negative finding*
 
-Remote and local evaluation produce **byte-identical failure sets**: same 28 passes, same 12
-failures, same reasons. The comparison was the main reason for running both modes -- Flagsmith's
+Remote and local evaluation produce **byte-identical failure sets**: same 17 passes, same 12
+failures, same 11 skips, same reasons. The comparison was the main reason for running both modes -- Flagsmith's
 engine is reimplemented per language, Python in the Edge Proxy and Go in
 `flagsmith-go-client/flagengine` -- and on the canonical set they do not diverge at all.
 
