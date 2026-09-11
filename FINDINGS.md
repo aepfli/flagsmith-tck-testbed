@@ -1,7 +1,7 @@
 # Findings
 
 Pre-registered *before* any adoption runs, so "the suite found things" stays a prediction rather
-than a post-hoc story — the same discipline as `goff-tck-plan.md` §7.
+than a post-hoc story.
 
 Each finding says how it was established. **source** means read from the named file; **runtime**
 means observed against the container built from this repo on 2026-09-11. Nothing marked *source*

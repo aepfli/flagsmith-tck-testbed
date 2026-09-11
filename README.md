@@ -1,4 +1,4 @@
-# flagsmith-testbed
+# flagsmith-tck-testbed
 
 A provider-TCK backend for **Flagsmith**, built on the Flagsmith **Edge Proxy**.
 
@@ -48,9 +48,12 @@ One image, two processes. The launchpad supervises the proxy, which keeps `POST 
 *kill the backend process* rather than *stop the container* — the control API requires that,
 because dynamically mapped host ports do not survive a container restart.
 
-No Postgres, no Django, no Flagsmith API. See `../flagsmith-tck-plan.md` §4 for what that costs:
-this route does **not** prove the control API survives a database-backed vendor stack, which was
-the full stack's whole point.
+No Postgres, no Django, no Flagsmith API. That is deliberate, and it has a cost worth stating
+plainly: this route does **not** prove the control API survives a database-backed vendor stack.
+Most commercial vendors look like that, so being the first testbed to demonstrate it was the whole
+point of running the full Flagsmith stack — and the Edge Proxy buys its small footprint by giving
+that up. It becomes the third instance of the flagd pattern rather than the first instance of a new
+one.
 
 ## Run it
 
@@ -126,8 +129,9 @@ evaluation modes can point at this testbed:
 That second mode is worth more than it looks. Flagsmith's engine is independently reimplemented per
 language (Python in the proxy, Go in `flagsmith-go-client/flagengine`, and so on), so running both
 modes against a byte-identical document compares those implementations directly. It is the same
-shape as `goff-tck-plan.md` §7.7 — one engine, several hosts — except here they are separate
-reimplementations, which makes divergence more likely, not less.
+shape as the GO Feature Flag case — where one engine runs as a Go module in Go and as a WASM build
+in Java and JS — except here they are separate reimplementations, which makes divergence more
+likely, not less.
 
 **Caveat:** SDKs request `/api/v1/environment-document/` *with* a trailing slash; FastAPI answers
 `307` to the slashless route. Any client that follows redirects (Go's `http.Client` does for GET)
