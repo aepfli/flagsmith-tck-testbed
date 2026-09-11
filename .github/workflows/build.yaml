@@ -1,0 +1,130 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Pull requests build but do not push: a fork PR has no write token, and a testbed image
+      # tagged from an unreviewed branch is exactly the sort of thing an adoption would then pull
+      # in CI without noticing.
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building is not evidence that the testbed works. An image that starts and then serves
+      # FLAG_NOT_FOUND for the whole canonical set would pass a build-only job and fail every
+      # adoption downstream, which reads as a broken provider rather than a broken image.
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          docker build -t testbed:smoke .
+          docker run -d --name smoke -P testbed:smoke
+          trap 'docker logs smoke || true; docker rm -f smoke || true' EXIT
+
+          PROXY=$(docker port smoke 8000/tcp | head -1)
+          CONTROL=$(docker port smoke 8080/tcp | head -1)
+          KEY="ser.provider-tck-server-key"
+
+          for i in $(seq 1 60); do
+            if curl -sf "http://$CONTROL/healthz" >/dev/null; then break; fi
+            sleep 1
+          done
+
+          echo "::group::canonical flag set"
+          curl -sf -H "X-Environment-Key: $KEY" "http://$PROXY/api/v1/flags/" | jq -S '.'
+          echo "::endgroup::"
+
+          # Every canonical key must resolve, and missing-flag must not exist -- the absence is
+          # what the FLAG_NOT_FOUND scenario rests on.
+          for key in boolean-flag string-flag integer-flag float-flag object-flag wrong-flag \
+                     changing-flag boolean-zero-flag integer-zero-flag string-zero-flag \
+                     large-integer-flag huge-integer-flag integral-float-flag; do
+            curl -sf -H "X-Environment-Key: $KEY" \
+              "http://$PROXY/api/v1/flags/?feature=$key" >/dev/null \
+              || { echo "::error::$key did not resolve"; exit 1; }
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Environment-Key: $KEY" \
+            "http://$PROXY/api/v1/flags/?feature=missing-flag")
+          [ "$code" = "404" ] || { echo "::error::missing-flag returned $code, want 404"; exit 1; }
+
+          # Falsy values are values, not absences.
+          [ "$(curl -sf -H "X-Environment-Key: $KEY" \
+              "http://$PROXY/api/v1/flags/?feature=integer-zero-flag" | jq -r '.feature_state_value')" = "0" ] \
+            || { echo "::error::integer-zero-flag is not 0"; exit 1; }
+
+          # 2^53-1 must survive the round trip exactly.
+          [ "$(curl -sf -H "X-Environment-Key: $KEY" \
+              "http://$PROXY/api/v1/flags/?feature=huge-integer-flag" | jq -r '.feature_state_value')" = "9007199254740991" ] \
+            || { echo "::error::huge-integer-flag lost precision"; exit 1; }
+
+          value() {
+            curl -sf -H "X-Environment-Key: $KEY" \
+              "http://$PROXY/api/v1/flags/?feature=changing-flag" | jq -r '.feature_state_value'
+          }
+
+          # POST /change must not return until the new value is actually served.
+          before=$(value)
+          curl -sf -X POST "http://$CONTROL/change" >/dev/null
+          after=$(value)
+          [ "$before" != "$after" ] || { echo "::error::/change did not change the served value"; exit 1; }
+
+          # POST /start reseeds: the toggle must not survive it. flagd-testbed leaks here.
+          curl -sf -X POST "http://$CONTROL/start?config=default" >/dev/null
+          [ "$(value)" = "$before" ] || { echo "::error::/start did not reset flag state"; exit 1; }
+
+          # POST /stop makes the backend unreachable without stopping the container.
+          curl -sf -X POST "http://$CONTROL/stop" >/dev/null
+          curl -sf -m 5 -H "X-Environment-Key: $KEY" "http://$PROXY/api/v1/flags/" >/dev/null 2>&1 \
+            && { echo "::error::backend still reachable after /stop"; exit 1; }
+          [ "$(docker inspect -f '{{.State.Running}}' smoke)" = "true" ] \
+            || { echo "::error::/stop killed the container"; exit 1; }
+          curl -sf "http://$CONTROL/healthz" >/dev/null \
+            || { echo "::error::control API died with the backend"; exit 1; }
+
+          echo "smoke test passed"
