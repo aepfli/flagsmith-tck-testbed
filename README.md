@@ -27,17 +27,19 @@ python-sdk#619 — is real-backend semantics a stub would have answered correctl
 ## Architecture
 
 ```
-                      container
-  ┌──────────────────────────────────────────────────┐
-  │  launchpad (PID 1, Go)                           │
-  │    :8080  control API  /start /stop /restart     │
-  │                        /change /reset /healthz   │
-  │    :8080  GET /api/v1/environment-document/  ◀─┐ │
-  │                                                │ │   polls every 1s
-  │  edge-proxy (Flagsmith, real flag_engine)      │ │
-  │    :8000  GET /api/v1/flags/                 ──┘ │
-  │           POST /api/v1/identities/               │
-  └──────────────────────────────────────────────────┘
+                        container
+  ┌────────────────────────────────────────────────────────┐
+  │  launchpad (PID 1, Go)                                 │
+  │    :8080  control API  /start /stop /restart           │
+  │                        /change /reset /healthz         │
+  │    :8080  GET /api/v1/environment-document/  ◀──────┐  │
+  │                                                     │  │  polls every 1s
+  │  edge-proxy (Flagsmith, real flag_engine)           │  │
+  │    :8000  GET  /api/v1/flags/                  ─────┘  │
+  │           GET/POST /api/v1/identities/                 │
+  │           GET  /api/v1/environment-document            │
+  │           GET  /proxy/health{,/liveness,/readiness}    │
+  └────────────────────────────────────────────────────────┘
         ▲
         │  provider under test
 ```
@@ -69,7 +71,67 @@ curl -X POST "http://localhost:18080/start?config=default"
 curl -X POST  http://localhost:18080/change
 ```
 
-Or `docker compose up --build`, which maps both ports dynamically the way the TCK expects.
+Or via compose, which maps both ports dynamically the way the TCK expects — never pinned, so
+parallel runs do not collide:
+
+```bash
+docker compose up -d --build
+docker compose port flagsmith 8000   # -> 0.0.0.0:33674  (provider talks here)
+docker compose port flagsmith 8080   # -> 0.0.0.0:33675  (control API)
+```
+
+The compose healthcheck polls the launchpad's `/healthz`, so `docker compose ps` reports `healthy`
+only once the control API is answering.
+
+## Endpoints
+
+All verified 2026-09-11 through compose-mapped ports.
+
+### Edge Proxy — what the provider under test talks to
+
+| Endpoint | Status | Note |
+| --- | :-: | --- |
+| `GET /api/v1/flags/` | 200 | all 13 canonical flags |
+| `GET /api/v1/flags/?feature=<key>` | 200 | |
+| `GET /api/v1/flags/?feature=missing-flag` | 404 | what `FLAG_NOT_FOUND` rests on |
+| `GET /api/v1/identities/?identifier=<id>` | 200 | 13 flags + traits |
+| `POST /api/v1/identities/` | 200 | body `{identifier, traits[]}` |
+| `GET /api/v1/environment-document` | 200 | **local-evaluation mode**, see below |
+| `GET /proxy/health` · `/liveness` · `/readiness` | 200 | |
+| `GET /health` | 200 | deprecated alias |
+
+Both key kinds are accepted: `ser.provider-tck-server-key` and `provider-tck-client-key`. They
+return the same payload here because no feature is server-key-only and `hide_disabled_flags` is
+false — but a client key would filter both, so adoptions should use the server key.
+
+### Launchpad — control API
+
+| Endpoint | Status |
+| --- | :-: |
+| `POST /start?config=default` | 200 |
+| `POST /stop` · `/restart?seconds=` · `/change` · `/reset` | 200 |
+| `GET /healthz` | 200 |
+| `POST /start?config=nope` | 400 |
+
+## Two adoption modes, one testbed
+
+The proxy serves a complete environment document, not just evaluated flags. So both Flagsmith
+evaluation modes can point at this testbed:
+
+- **Remote evaluation** — the provider calls `/api/v1/flags/`; the **Edge Proxy's Python engine**
+  evaluates.
+- **Local evaluation** — the provider fetches `/api/v1/environment-document/` and evaluates
+  in-process with **its own language's engine**.
+
+That second mode is worth more than it looks. Flagsmith's engine is independently reimplemented per
+language (Python in the proxy, Go in `flagsmith-go-client/flagengine`, and so on), so running both
+modes against a byte-identical document compares those implementations directly. It is the same
+shape as `goff-tck-plan.md` §7.7 — one engine, several hosts — except here they are separate
+reimplementations, which makes divergence more likely, not less.
+
+**Caveat:** SDKs request `/api/v1/environment-document/` *with* a trailing slash; FastAPI answers
+`307` to the slashless route. Any client that follows redirects (Go's `http.Client` does for GET)
+is fine. Verified: `307 -> 200`.
 
 ## Connection parameters for an adoption
 
@@ -157,6 +219,13 @@ a boolean flag is (FINDINGS #5).
   draft.
 - **Only Go's provider has been read.** Java, JS, PHP and Ruby are hand-written against the same
   API; divergence between them is the highest-value thing an adoption could surface.
-- **No `identities` coverage.** The proxy serves `POST /api/v1/identities/` and the providers use it
-  whenever a targeting key is present, which is also where FINDINGS #4 bites. Untested here.
+- **`identities` is reachable but unexercised.** Both forms answer 200 and return all 13 flags, but
+  nothing has driven them through a provider — and that is exactly where FINDINGS #4
+  (`TARGETING_MATCH` claimed without a match) bites, because the providers switch to this endpoint
+  the moment a targeting key is in context.
+- **Local-evaluation mode is available but untried.** The document endpoint works; no provider has
+  been pointed at it.
+- **No segments.** `project.segments` is empty and no flag has targeting rules, which is what the
+  canonical set requires. Segment evaluation is therefore entirely untested — fine for the TCK,
+  worth knowing before anyone reuses this testbed for something else.
 - Only the `default` configuration exists.
