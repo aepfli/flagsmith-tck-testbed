@@ -59,9 +59,13 @@ evaluation context, before any evaluation happens, and never revises it. A flag 
 rules — which is *every* flag in the canonical set, deliberately — still reports
 `TARGETING_MATCH` if the scenario passed a targeting key.
 
-Direct consequence for the TCK: every scenario asserting `STATIC` fails the moment a targeting key
-is in context. This is the single most likely cause of a red first run, and it is a provider bug,
-not a testbed one.
+**Consequence for the TCK: none, as the suite stands.** No scenario in `gherkin/*.feature` passes a
+targeting key -- `evaluation.feature` says so explicitly, that flags resolve "to the default variant
+with no targeting involved". So the bad branch is never entered and this will not turn a run red.
+
+Recorded anyway, because it is a real provider defect that any application using identity-based
+evaluation hits, and because it is exactly what the context-passthrough scenarios would catch once
+the control API grows an echo endpoint (see the `@targeting` capability, currently reserved).
 
 ## 5. Two modes of the same provider disagree about what a boolean flag *is* — *source*
 
