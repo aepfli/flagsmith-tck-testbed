@@ -188,8 +188,21 @@ func buildDocument(canonicalPath string, apiKey string) (*environmentDocument, e
 		},
 		FeatureStates:     states,
 		IdentityOverrides: []any{},
-		UpdatedAt:         time.Now().UTC().Format("2006-01-02T15:04:05.000000"),
+		UpdatedAt:         timestamp(),
 	}, nil
+}
+
+// timestamp renders updated_at.
+//
+// It MUST carry a timezone. Django REST Framework emits ISO-8601 with one, and the two consumers
+// of this document disagree about whether that is optional: the Edge Proxy's Python parses a naive
+// timestamp happily via datetime.fromisoformat, while the Go engine unmarshals into a time.Time
+// and rejects anything that is not RFC 3339. A naive timestamp therefore works perfectly in remote
+// evaluation and breaks local evaluation with "cannot parse \"\" as \"Z07:00\"" -- which surfaces
+// as every flag falling back to its code default with error code GENERAL, and reads like a broken
+// provider rather than a malformed document.
+func timestamp() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000000Z07:00")
 }
 
 // setValue replaces one flag's feature_state_value and bumps updated_at, which is what the Edge
@@ -198,7 +211,7 @@ func (d *environmentDocument) setValue(name string, value any) bool {
 	for _, fs := range d.FeatureStates {
 		if fs.Feature.Name == name {
 			fs.Value = value
-			d.UpdatedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000000")
+			d.UpdatedAt = timestamp()
 			return true
 		}
 	}

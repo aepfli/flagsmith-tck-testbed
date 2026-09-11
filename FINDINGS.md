@@ -121,14 +121,85 @@ Not a bug — a backend constraint the translation has to honour. Consequences: 
 is **not applicable** against this backend (see also #2), and `object-flag` round-trips through a
 JSON string.
 
-## 10. Open — needs an adoption to settle
+## 11. Variant is unpopulatable, and 10 scenarios depend on it — *runtime*
 
-- Do the Java, JS, PHP and Ruby Flagsmith providers share #2, #4 and #5? All five are
-  hand-written against the same API, so divergence is likely and is the highest-value thing an
-  adoption can surface.
-- What does the provider report for `@unavailable`? `/stop` makes the proxy refuse connections;
-  the Go provider maps a client error to `GENERAL`, not to a failed `initialize`, so
-  `@unavailable` may be unsatisfiable the way it is for GOFF remote.
-- Does any Flagsmith provider implement `StateHandler`/`EventHandler` at all? If not, `@events`,
-  `@lifecycle`, `@stale` and `@config-change` are all undeclared, and `/change` and `/restart`
-  exist here for nothing but future use.
+The largest single cause of failure in the first real run: 10 of 12 failing scenarios fail with
+`variant was ""`.
+
+Flagsmith has no variant concept for a standard feature. A feature state is `enabled` plus
+`feature_state_value` and nothing names the value; the Edge Proxy's `map_flag_result_to_response_data`
+returns `{feature:{id,name,type}, enabled, feature_state_value}`, with no variant key on the wire at
+all. Multivariate features carry `multivariate_feature_option` keys internally, but those are not in
+the evaluation response either. So the provider is not dropping the variant -- it never receives one,
+and no seeding of the canonical set can produce one.
+
+**This is a finding about the TCK, not about Flagsmith.** The canonical set is expressed in flagd's
+format and its own comment says what matters is "the keys, types, variant names and resolved
+values". Variant names are not universally available: a backend can be perfectly conformant and have
+no such concept. The evaluation scenarios assert variant unconditionally, so any such backend fails
+10 scenarios for a reason that is not a defect.
+
+Worth raising on spec#417: either variant assertions need a capability gate, the way `@object` and
+`@large-integers` gate theirs, or the canonical set should stop requiring them. Until then the
+honest report for Flagsmith is "fails, for a reason the suite cannot currently express".
+
+## 12. The type-mismatch matrix is partly unsatisfiable here — *runtime*
+
+The other 2 failures. Reading `float-flag` as a **string** returns `"0.5"` rather than
+`TYPE_MISMATCH`, and `object-flag` as a string returns the raw JSON text.
+
+Neither is a provider bug. Flagsmith has no float type and no object type (#9), so both really are
+strings on this backend -- asking for `float-flag` as a string is a correct request that correctly
+succeeds. The scenario assumes the backend's type system distinguishes them, and Flagsmith's does
+not.
+
+Same shape as #11: a canonical set carrying flagd's type model, asserted against a backend with a
+coarser one. Distinguishable from #11 in one respect worth keeping -- this one *could* be fixed by
+seeding `float-flag` as something that is not a string, except that #2 means nothing else resolves
+through `GetFloatValue`. The two defects lock each other in place.
+
+## 13. Both engines agree exactly — *runtime, negative finding*
+
+Remote and local evaluation produce **byte-identical failure sets**: same 28 passes, same 12
+failures, same reasons. The comparison was the main reason for running both modes -- Flagsmith's
+engine is reimplemented per language, Python in the Edge Proxy and Go in
+`flagsmith-go-client/flagengine` -- and on the canonical set they do not diverge at all.
+
+Recorded because a negative result from a test designed to find divergence is worth as much as a
+positive one, and because it will be worth re-running when Java and JS adoptions exist.
+
+## 14. Local evaluation has a startup race the provider cannot close — *runtime*
+
+In local-evaluation mode the client fetches the environment document on a background poll. The
+provider implements no `openfeature.StateHandler`, so it has no `Init` in which to block, and the
+SDK synthesises `PROVIDER_READY` on registration. Evaluations in that window return the code default
+with error code `GENERAL` and the message "local environment has not yet been updated".
+
+This is the flagd#2047 shape moved into the provider: something reports ready before it can serve a
+flag. A conformant provider would block in `Init`. The adoption cannot fix it and waits for the
+first sync before handing the provider back, which is why the suite is deterministic rather than
+flaky -- the underlying defect is unchanged.
+
+## 15. `updated_at` must carry a timezone, and only one consumer enforces it — *runtime, our bug*
+
+Fixed here, recorded because the failure mode was misleading. The launchpad first emitted
+`updated_at` as a naive ISO timestamp. The Edge Proxy's Python accepted it happily
+(`datetime.fromisoformat`), so remote evaluation was perfect; the Go engine unmarshals into a
+`time.Time`, requires RFC 3339, and failed with `cannot parse "" as "Z07:00"` -- which surfaces as
+*every* flag falling back to its code default with `GENERAL`, i.e. as a catastrophically broken
+provider rather than as one malformed field.
+
+Django REST Framework emits a timezone, so real Flagsmith would not have hit this. The transferable
+part is that the two reference consumers of the same document disagree about how strict the format
+is, and only the stricter one tells you.
+
+## 16. Open — still unsettled
+
+- Do the Java, JS, PHP and Ruby Flagsmith providers share #2, #4, #5 and #11? All five are
+  hand-written against the same API, so divergence is likely and is the highest-value thing a
+  further adoption can surface. #13 says the two Go paths agree; it says nothing about the others.
+- **Settled by the Go adoption:** the Go provider implements no `Init`, `Shutdown`, `Status` or
+  `EventChannel`, so `@events`, `@lifecycle`, `@stale`, `@configuration-change`, `@unavailable` and
+  `@reinitialization` are all undeclared. `/change`, `/restart` and `/reset` are therefore
+  implemented here and observed by nothing yet. Whether the other languages' providers do better is
+  open.

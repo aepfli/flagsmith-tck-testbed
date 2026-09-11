@@ -266,7 +266,7 @@ func (lp *launchpad) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lp.current = lp.baseline.clone()
-	lp.current.UpdatedAt = time.Now().UTC().Format("2006-01-02T15:04:05.000000")
+	lp.current.UpdatedAt = timestamp()
 	want, _ := lp.current.value(changingFlag)
 	lp.mu.Unlock()
 
