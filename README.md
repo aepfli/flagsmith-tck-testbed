@@ -157,7 +157,18 @@ The control API has no way to communicate these (FINDINGS #1), so they are fixed
 | `POST /restart?seconds=` | kill, sleep, restart, probe; **flag state preserved** | 2671ms at `seconds=2` |
 | `POST /change` | flip `changing-flag`, bump `updated_at`, poll until the new value is served | 472–987ms |
 | `POST /reset` | restore the baseline document, **no process restart** | 994ms |
-| `GET /healthz` | launchpad liveness | 200 |
+| `GET /healthz` | **control API** readiness, not the backend's | 200 |
+
+### `/healthz` is not a backend readiness probe, deliberately
+
+It reports whether the **control API** is ready, which the OpenAPI document is explicit about: the
+backend is deliberately unhealthy during outage scenarios while the control API has to stay
+reachable, or the TCK could never end the outage. So `/healthz` answers 200 while the Edge Proxy is
+still starting, and evaluating straight after it is a race.
+
+Do not "fix" this by gating it on the backend. The endpoint that carries the readiness guarantee is
+`POST /start`, which must not return until the seeded flag state is actually being served. This
+repo's own CI failed on that distinction before it called `/start`.
 
 `/change` and `/reset` are bounded by the proxy's 1s poll (`api_poll_frequency_seconds`, lowered
 from its default of 10 — nothing would complete in a sane time otherwise).

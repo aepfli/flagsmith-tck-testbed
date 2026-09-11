@@ -71,10 +71,19 @@ jobs:
           CONTROL=$(docker port smoke 8080/tcp | head -1)
           KEY="ser.provider-tck-server-key"
 
+          # /healthz reports the readiness of the CONTROL API, not of the backend -- the control
+          # API deliberately stays up while the backend is down, otherwise an outage scenario
+          # could never be ended. So waiting on it says nothing about whether flags are being
+          # served, and evaluating straight afterwards is a race. (This is the flagd#2047 shape,
+          # and this job failed on exactly it before the /start call below was added.)
+          #
+          # POST /start is the endpoint that carries the guarantee: it must not return until the
+          # seeded flag state is actually being served. Use it, and in doing so test it.
           for i in $(seq 1 60); do
             if curl -sf "http://$CONTROL/healthz" >/dev/null; then break; fi
             sleep 1
           done
+          curl -sf -X POST "http://$CONTROL/start?config=default" >/dev/null
 
           echo "::group::canonical flag set"
           curl -sf -H "X-Environment-Key: $KEY" "http://$PROXY/api/v1/flags/" | jq -S '.'
