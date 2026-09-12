@@ -91,9 +91,13 @@ jobs:
 
           # Every canonical key must resolve, and missing-flag must not exist -- the absence is
           # what the FLAG_NOT_FOUND scenario rests on.
-          for key in boolean-flag string-flag integer-flag float-flag object-flag wrong-flag \
-                     changing-flag boolean-zero-flag integer-zero-flag string-zero-flag \
-                     large-integer-flag huge-integer-flag integral-float-flag; do
+          #
+          # The key list is DERIVED from the canonical set, never hardcoded. It was hardcoded once,
+          # and when the spec added targeting-key-flag this job kept passing while the image served
+          # a set one flag short of the canonical one -- the exact drift the check exists to catch.
+          keys=$(jq -r '.flags | keys[]' flags/canonical-flags.json)
+          echo "checking $(echo "$keys" | wc -l) canonical keys"
+          for key in $keys; do
             curl -sf -H "X-Environment-Key: $KEY" \
               "http://$PROXY/api/v1/flags/?feature=$key" >/dev/null \
               || { echo "::error::$key did not resolve"; exit 1; }
@@ -111,6 +115,22 @@ jobs:
           [ "$(curl -sf -H "X-Environment-Key: $KEY" \
               "http://$PROXY/api/v1/flags/?feature=huge-integer-flag" | jq -r '.feature_state_value')" = "9007199254740991" ] \
             || { echo "::error::huge-integer-flag lost precision"; exit 1; }
+
+          # Targeting, seeded as a Flagsmith identity override. All three directions, because a
+          # backend that always served the targeted value would pass the matching case alone.
+          tkf() {
+            curl -sf -H "X-Environment-Key: $KEY" "$1" \
+              | jq -r '(if type=="object" then .flags else . end)
+                       | map(select(.feature.name=="targeting-key-flag"))[0].feature_state_value'
+          }
+          hit_id="5c3d8535-f81a-4478-a6d3-afaa4d51199e"
+          miss_id="f20bd32d-703b-48b6-bc8e-79d53c85134a"
+          [ "$(tkf "http://$PROXY/api/v1/flags/")" = "miss" ] \
+            || { echo "::error::targeting-key-flag without a context is not miss"; exit 1; }
+          [ "$(tkf "http://$PROXY/api/v1/identities/?identifier=$hit_id")" = "hit" ] \
+            || { echo "::error::targeting-key-flag for the targeted identity is not hit"; exit 1; }
+          [ "$(tkf "http://$PROXY/api/v1/identities/?identifier=$miss_id")" = "miss" ] \
+            || { echo "::error::targeting-key-flag for a non-targeted identity is not miss"; exit 1; }
 
           value() {
             curl -sf -H "X-Environment-Key: $KEY" \

@@ -2,9 +2,12 @@
 
 A provider-TCK backend for **Flagsmith**, built on the Flagsmith **Edge Proxy**.
 
-Status: **working prototype, 2026-09-11.** Scratch repo, no permanent home. Every control-API
-operation is implemented and verified against a running container; **no OpenFeature adoption exists
-yet**, so nothing here has been driven through a provider.
+Status: **working prototype, 2026-09-12.** Scratch repo, no permanent home.
+
+Every control-API operation is implemented and verified against a running container, and the Go
+provider has now been driven through it end to end:
+[go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959) (draft) reports
+**31 passed, 2 failed, 19 skipped out of 52**, identical in both evaluation modes.
 
 See [FINDINGS.md](FINDINGS.md) for what reading the source turned up before any adoption ran.
 
@@ -94,10 +97,10 @@ All verified 2026-09-11 through compose-mapped ports.
 
 | Endpoint | Status | Note |
 | --- | :-: | --- |
-| `GET /api/v1/flags/` | 200 | all 13 canonical flags |
+| `GET /api/v1/flags/` | 200 | all 14 canonical flags |
 | `GET /api/v1/flags/?feature=<key>` | 200 | |
 | `GET /api/v1/flags/?feature=missing-flag` | 404 | what `FLAG_NOT_FOUND` rests on |
-| `GET /api/v1/identities/?identifier=<id>` | 200 | 13 flags + traits |
+| `GET /api/v1/identities/?identifier=<id>` | 200 | 14 flags + traits; carries targeting, see below |
 | `POST /api/v1/identities/` | 200 | body `{identifier, traits[]}` |
 | `GET /api/v1/environment-document` | 200 | **local-evaluation mode**, see below |
 | `GET /proxy/health` · `/liveness` · `/readiness` | 200 | |
@@ -208,39 +211,70 @@ string-flag          "hi"          large-integer-flag   2147483647
 string-zero-flag     ""            huge-integer-flag    9007199254740991
 float-flag           "0.5"         integral-float-flag  "10.0"
 wrong-flag           "uno"         changing-flag        "foo"
+targeting-key-flag   "miss"        (-> "hit" for the targeted identity)
 object-flag          "{\"imagesPerPage\":100,\"showImages\":true,\"title\":\"Check out these pics!\"}"
 missing-flag         404
 ```
 
 Falsy values survive, and 2^53-1 is exact.
 
-## Predicted capability declarations
+### Targeting is seeded as an identity override
 
-Predictions, not measurements — no adoption exists.
+`targeting-key-flag` is the one canonical flag with a rule, and the canonical set specifies it by
+behaviour rather than syntax: resolve `hit` when the targeting key is a given uuid, `miss`
+otherwise, expressed however the backend expresses targeting.
 
-| | `@events` | `@lifecycle` | `@stale` | `@config-change` | `@object` | `@unavailable` | `@numeric-coercion` |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Go, default mode | ? | ? | ? | ? | yes | ? | n/a (#9, #2) |
-| Go, `WithUsingBooleanConfigValue` | ? | ? | ? | ? | yes | ? | n/a |
+Flagsmith's native encoding is an **identity override**. A targeting key *is* a Flagsmith
+identifier -- the provider calls `GetIdentityFlags(targetingKey)` whenever one is present -- so the
+launchpad seeds the rule into the environment document's `identity_overrides`, keyed by that uuid
+and overriding the one feature. Segments would be the wrong tool: they match on traits, and the
+canonical rule has none.
 
-The `?`s are FINDINGS #10: nothing is known about whether any Flagsmith provider implements
-`StateHandler`/`EventHandler`. Both Go modes must be declared separately — they disagree about what
-a boolean flag is (FINDINGS #5).
+The launchpad parses the rule's JsonLogic narrowly rather than implementing JsonLogic. An
+unrecognised shape is an **error**, not a silent skip -- seeding a targeting flag with no rule would
+make the non-matching-context scenario pass for the wrong reason.
+
+Verified through the real engine, in both modes: no context and a non-matching key both resolve
+`miss`, the matching key resolves `hit`, and `string-flag` still resolves `hi` when a context is
+supplied.
+
+## Measured capability declarations
+
+No longer predictions. From [go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959),
+identical in both modes:
+
+| | `@object` | `@large-integers` | `@targeting` | `@variants` | `@events` | `@lifecycle` | `@stale` | `@configuration-change` | `@unavailable` | `@numeric-coercion` |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Go, remote | yes | yes | yes | no | no | no | no | no | no | no |
+| Go, local | yes | yes | yes | no | no | no | no | no | no | no |
+
+Most of the `no`s come from one fact: the Go provider implements none of `Init`, `Shutdown`,
+`Status` or `EventChannel`, so it is neither a `StateHandler` nor an `EventHandler` and has no
+observable lifecycle to assert against. Declaring those would make the scenarios pass without the
+provider doing anything, which is worse than a skip.
+
+`@variants` is withheld because Flagsmith has no variant concept for a plain feature (FINDINGS #11).
+That is permitted rather than defective -- 2.2.4 makes the variant a SHOULD -- so it carries no
+deviation entry. This testbed's first run is what produced that capability.
+
+`@numeric-coercion` is the one withheld because of an actual defect, and carries a deviation entry
+(FINDINGS #2).
 
 ## Not done
 
-- **No adoption.** The next step is `go-sdk-contrib/tools/provider-tck`, both Go modes.
-- **No published image**, so no contrib repo's CI can depend on this and any adoption PR stays a
-  draft.
-- **Only Go's provider has been read.** Java, JS, PHP and Ruby are hand-written against the same
-  API; divergence between them is the highest-value thing an adoption could surface.
-- **`identities` is reachable but unexercised.** Both forms answer 200 and return all 13 flags, but
-  nothing has driven them through a provider — and that is exactly where FINDINGS #4
-  (`TARGETING_MATCH` claimed without a match) bites, because the providers switch to this endpoint
-  the moment a targeting key is in context.
-- **Local-evaluation mode is available but untried.** The document endpoint works; no provider has
-  been pointed at it.
-- **No segments.** `project.segments` is empty and no flag has targeting rules, which is what the
-  canonical set requires. Segment evaluation is therefore entirely untested — fine for the TCK,
-  worth knowing before anyone reuses this testbed for something else.
-- Only the `default` configuration exists.
+- **No published home.** The image is `ghcr.io/aepfli/flagsmith-tck-testbed`, in a personal
+  namespace, which is the single reason #959 stays a draft: a contrib repo's CI should not depend
+  on it. This is the next thing to fix.
+- **Only Go's provider has been driven through it.** Java, JS, PHP and Ruby are hand-written against
+  the same API; divergence between them is the highest-value thing a further adoption could surface.
+  FINDINGS #13 says the two Go paths agree exactly; it says nothing about the others.
+- **`/change`, `/restart` and `/reset` are observed by nothing.** They work and are verified by CI,
+  but the Go adoption declares no event or lifecycle capability, so no scenario drives them. They
+  are there for a provider that implements `StateHandler`.
+- **No segments.** `project.segments` is empty. Targeting is done with identity overrides, so
+  segment evaluation is entirely untested -- fine for the TCK, worth knowing before anyone reuses
+  this testbed for something else.
+- **Only the `default` configuration exists.**
+- **Two scenarios fail and are not solvable here** -- reading `float-flag` or `object-flag` as a
+  string succeeds where the suite wants `TYPE_MISMATCH`, because Flagsmith stores both as strings.
+  See FINDINGS #12; it needs a decision upstream, not a change in this repo.

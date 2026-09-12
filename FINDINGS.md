@@ -59,13 +59,26 @@ evaluation context, before any evaluation happens, and never revises it. A flag 
 rules — which is *every* flag in the canonical set, deliberately — still reports
 `TARGETING_MATCH` if the scenario passed a targeting key.
 
-**Consequence for the TCK: none, as the suite stands.** No scenario in `gherkin/*.feature` passes a
-targeting key -- `evaluation.feature` says so explicitly, that flags resolve "to the default variant
-with no targeting involved". So the bad branch is never entered and this will not turn a run red.
+**Consequence for the TCK: still none, but the reason has changed twice and is worth getting right.**
 
-Recorded anyway, because it is a real provider defect that any application using identity-based
-evaluation hits, and because it is exactly what the context-passthrough scenarios would catch once
-the control API grows an echo endpoint (see the `@targeting` capability, currently reserved).
+Originally there was no consequence because no scenario passed a targeting key at all. That stopped
+being true when the spec added the evaluation-context and `@targeting` scenarios: four of them now
+supply one, and the bad branch *is* entered. One of those four, "Supplying an evaluation context does
+not disturb an untargeted resolution", asks for `string-flag` -- a flag with no targeting rule
+whatsoever -- with a targeting key in context, and this provider reports `TARGETING_MATCH` for it.
+That is plainly wrong.
+
+It still does not turn a run red, because those scenarios **deliberately do not assert the reason**.
+`evaluation.feature` says why: 2.2.5 lets a provider populate the reason with "some other string",
+and with a context supplied and nothing matching, both `STATIC` and `DEFAULT` are defensible; for
+the targeted pair, flagd itself reports `TARGETING_MATCH` for the hit and `DEFAULT` for the miss, so
+there is no single value to pin.
+
+So this is now a **deliberate blind spot** of the suite rather than an accidental one, and a
+provider can report `TARGETING_MATCH` for a flag that has no targeting rule and pass. Recorded
+because it is a real defect any application using identity-based evaluation hits, and because "the
+suite does not catch it" is a much weaker statement than "the suite cannot catch it" -- the first
+correction in this file said the former when it meant the latter.
 
 ## 5. Two modes of the same provider disagree about what a boolean flag *is* — *source*
 
