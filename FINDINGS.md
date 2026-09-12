@@ -121,10 +121,15 @@ Not a bug — a backend constraint the translation has to honour. Consequences: 
 is **not applicable** against this backend (see also #2), and `object-flag` round-trips through a
 JSON string.
 
-## 11. Variant is unpopulatable, and 10 scenarios depend on it — *runtime*
+## 11. Variant is unpopulatable, and 10 scenarios depended on it — *runtime, RESOLVED upstream*
 
-The largest single cause of failure in the first real run: 10 of 12 failing scenarios fail with
-`variant was ""`. Full outcome, out of 40 scenarios: **17 passed, 12 failed, 11 skipped**.
+**Resolved.** The spec added a `@variants` capability and the Go suite gates the variant assertions
+on it, so a backend with no variant concept now skips them with a reason instead of failing. This
+entry is kept because it is the finding that produced the gate.
+
+As originally recorded: the largest single cause of failure in the first real run was 10 of 12
+failing scenarios failing with `variant was ""`, out of 40 scenarios — 17 passed, 12 failed, 11
+skipped.
 
 (`go test` prints 28 PASS lines, but 11 of those are the skipped scenarios -- godog skips them and
 the Go subtest still passes. Reading that 28 as the conformance result is exactly the vacuous-pass
@@ -144,9 +149,10 @@ values". Variant names are not universally available: a backend can be perfectly
 no such concept. The evaluation scenarios assert variant unconditionally, so any such backend fails
 10 scenarios for a reason that is not a defect.
 
-Worth raising on spec#417: either variant assertions need a capability gate, the way `@object` and
-`@large-integers` gate theirs, or the canonical set should stop requiring them. Until then the
-honest report for Flagsmith is "fails, for a reason the suite cannot currently express".
+The fix took the first option: `@variants`, gating the variant scenarios exactly as `@object` and
+`@large-integers` gate theirs. 2.2.4 makes populating the variant a SHOULD and `types.md` marks the
+field optional, so withholding it is a permitted shape and needs no deviation entry. The adoption
+now withholds it and those scenarios skip.
 
 ## 12. The type-mismatch matrix is partly unsatisfiable here — *runtime*
 
@@ -165,8 +171,10 @@ through `GetFloatValue`. The two defects lock each other in place.
 
 ## 13. Both engines agree exactly — *runtime, negative finding*
 
-Remote and local evaluation produce **byte-identical failure sets**: same 17 passes, same 12
-failures, same 11 skips, same reasons. The comparison was the main reason for running both modes -- Flagsmith's
+Remote and local evaluation produce **byte-identical results**. First run: 17 passes, 12 failures,
+11 skips. After `@variants` and `@targeting` landed and the testbed grew targeting support: **31
+passes, 2 failures, 19 skips out of 52**, including all four evaluation-context and targeting
+scenarios. The comparison was the main reason for running both modes -- Flagsmith's
 engine is reimplemented per language, Python in the Edge Proxy and Go in
 `flagsmith-go-client/flagengine` -- and on the canonical set they do not diverge at all.
 
@@ -197,6 +205,24 @@ provider rather than as one malformed field.
 Django REST Framework emits a timezone, so real Flagsmith would not have hit this. The transferable
 part is that the two reference consumers of the same document disagree about how strict the format
 is, and only the stricter one tells you.
+
+## 17. Targeting works, via identity overrides — *runtime*
+
+The canonical set gained `targeting-key-flag`, whose rule is specified by behaviour rather than
+syntax: resolve `hit` when the targeting key is a given uuid, `miss` otherwise.
+
+Flagsmith's native encoding for that is an **identity override**. A targeting key *is* a Flagsmith
+identifier — the Go provider calls `GetIdentityFlags(targetingKey)` whenever one is present — so the
+launchpad seeds the rule as an entry in the environment document's `identity_overrides`, keyed by
+that uuid and overriding the one feature. Segments would be the wrong tool: they match on traits,
+and the canonical rule has none.
+
+The launchpad parses the rule's JsonLogic narrowly rather than implementing JsonLogic, which the
+canonical set licenses. An unrecognised shape is an **error**, not a silent skip: seeding a
+targeting flag with no rule would make the non-matching-context scenario pass for the wrong reason.
+
+All four scenarios pass in both evaluation modes, so the Python engine in the proxy and the Go
+engine in the SDK agree on identity overrides too.
 
 ## 16. Open — still unsettled
 
