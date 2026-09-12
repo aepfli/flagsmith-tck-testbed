@@ -198,12 +198,19 @@ func targetingKeyRule(raw json.RawMessage) (identifier, variant string, err erro
 
 // buildDocument turns the canonical flag set into an environment document.
 //
-// Every flag is seeded `enabled: true`. This is load-bearing and deserves the comment: the
-// Flagsmith providers return the *caller's default value* with reason DISABLED for a disabled
-// flag, so seeding boolean-zero-flag as `enabled: false` would not resolve to `false`, it would
-// resolve to whatever default the scenario passed in -- and the falsy-value scenario exists
-// precisely to catch that. Boolean flags are therefore modelled as feature_state_value, not as
-// Flagsmith's enabled state. See FINDINGS.md #3.
+// A flag's `state` maps onto Flagsmith's `enabled`, and the mapping is unusually direct: Flagsmith
+// models a feature state as `enabled` plus `feature_state_value`, which is exactly the pair the
+// canonical set's `state` and `defaultVariant` describe.
+//
+// Everything except the four `disabled-*` flags is ENABLED, and that is load-bearing rather than
+// incidental. The Flagsmith providers return the *caller's default* with reason DISABLED for a
+// disabled flag, so seeding boolean-zero-flag as `enabled: false` would not resolve to `false` --
+// it would resolve to whatever default the scenario passed in, and the falsy-value scenario exists
+// precisely to catch that. Ordinary boolean flags are therefore modelled as feature_state_value,
+// not as Flagsmith's enabled state. See FINDINGS.md #3.
+//
+// The `disabled-*` flags are the deliberate exception: they exist to assert the disabled behaviour
+// itself, so for them the enabled state IS the thing under test.
 func buildDocument(canonicalPath string, apiKey string) (*environmentDocument, error) {
 	b, err := os.ReadFile(canonicalPath)
 	if err != nil {
@@ -235,7 +242,7 @@ func buildDocument(canonicalPath string, apiKey string) (*environmentDocument, e
 		id := i + 1
 		states = append(states, &featureState{
 			Feature:          &feature{ID: id, Name: name, Type: "STANDARD"},
-			Enabled:          true,
+			Enabled:          !strings.EqualFold(flag.State, "DISABLED"),
 			FeatureSegment:   nil,
 			DjangoID:         id,
 			FeatureStateUUID: fmt.Sprintf("00000000-0000-0000-0000-%012d", id),

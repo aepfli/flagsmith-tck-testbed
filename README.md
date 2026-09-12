@@ -97,10 +97,10 @@ All verified 2026-09-11 through compose-mapped ports.
 
 | Endpoint | Status | Note |
 | --- | :-: | --- |
-| `GET /api/v1/flags/` | 200 | all 14 canonical flags |
+| `GET /api/v1/flags/` | 200 | all 18 canonical flags |
 | `GET /api/v1/flags/?feature=<key>` | 200 | |
 | `GET /api/v1/flags/?feature=missing-flag` | 404 | what `FLAG_NOT_FOUND` rests on |
-| `GET /api/v1/identities/?identifier=<id>` | 200 | 14 flags + traits; carries targeting, see below |
+| `GET /api/v1/identities/?identifier=<id>` | 200 | 18 flags + traits; carries targeting, see below |
 | `POST /api/v1/identities/` | 200 | body `{identifier, traits[]}` |
 | `GET /api/v1/environment-document` | 200 | **local-evaluation mode**, see below |
 | `GET /proxy/health` · `/liveness` · `/readiness` | 200 | |
@@ -198,9 +198,15 @@ object type — so floats and objects are seeded as strings, which is what the p
 `10`; without it `integral-float-flag` would be seeded as an integer and the lossless-coercion
 scenario would pass without coercing anything.
 
-Every flag is seeded `enabled: true` and booleans are modelled as values, not as Flagsmith's
-enabled state — a disabled flag resolves to the *caller's default* (FINDINGS #6), which would
-silently defeat the falsy-value scenarios.
+A flag's `state` maps onto Flagsmith's `enabled`, which is an unusually direct fit: Flagsmith models
+a feature state as `enabled` plus `feature_state_value`, exactly the pair `state` and
+`defaultVariant` describe.
+
+Everything except the four `disabled-*` flags is enabled, and ordinary booleans are modelled as
+values rather than as the enabled state — a disabled flag resolves to the *caller's default*
+(FINDINGS #6), which would silently defeat the falsy-value scenarios. The `disabled-*` flags are the
+deliberate exception: for them the enabled state is the thing under test, and their configured
+values are kept intact so a provider that ignores the state is caught by the value it returns.
 
 Observed through the real engine:
 

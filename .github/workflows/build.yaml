@@ -116,6 +116,15 @@ jobs:
               "http://$PROXY/api/v1/flags/?feature=huge-integer-flag" | jq -r '.feature_state_value')" = "9007199254740991" ] \
             || { echo "::error::huge-integer-flag lost precision"; exit 1; }
 
+          # The canonical set's state maps onto Flagsmith's `enabled`. The four disabled-* flags
+          # must be served disabled with their configured values intact -- the scenarios catch a
+          # provider that ignores the state by the value it returns, so dropping the value would
+          # make them pass for the wrong reason.
+          for key in $(jq -r '.flags | to_entries[] | select(.value.state != "ENABLED") | .key' flags/canonical-flags.json); do
+            enabled=$(curl -sf -H "X-Environment-Key: $KEY"               "http://$PROXY/api/v1/flags/?feature=$key" | jq -r '.enabled')
+            [ "$enabled" = "false" ] || { echo "::error::$key is served enabled=$enabled, want false"; exit 1; }
+          done
+
           # Targeting, seeded as a Flagsmith identity override. All three directions, because a
           # backend that always served the targeted value would pass the matching case alone.
           tkf() {
