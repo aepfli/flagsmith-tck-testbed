@@ -134,7 +134,7 @@ Not a bug — a backend constraint the translation has to honour. Consequences: 
 is **not applicable** against this backend (see also #2), and `object-flag` round-trips through a
 JSON string.
 
-## 11. Variant is unpopulatable, and 10 scenarios depended on it — *runtime, RESOLVED upstream*
+## 10. Variant is unpopulatable, and 10 scenarios depended on it — *runtime, RESOLVED upstream*
 
 **Resolved.** The spec added a `@variants` capability and the Go suite gates the variant assertions
 on it, so a backend with no variant concept now skips them with a reason instead of failing. This
@@ -167,7 +167,7 @@ The fix took the first option: `@variants`, gating the variant scenarios exactly
 field optional, so withholding it is a permitted shape and needs no deviation entry. The adoption
 now withholds it and those scenarios skip.
 
-## 12. The type-mismatch matrix is partly unsatisfiable here — *runtime*
+## 11. The type-mismatch matrix is partly unsatisfiable here — *runtime*
 
 The other 2 failures. Reading `float-flag` as a **string** returns `"0.5"` rather than
 `TYPE_MISMATCH`, and `object-flag` as a string returns the raw JSON text.
@@ -182,19 +182,27 @@ coarser one. Distinguishable from #11 in one respect worth keeping -- this one *
 seeding `float-flag` as something that is not a string, except that #2 means nothing else resolves
 through `GetFloatValue`. The two defects lock each other in place.
 
-## 13. Both engines agree exactly — *runtime, negative finding*
+## 12. Both engines agree exactly — *runtime, negative finding*
 
-Remote and local evaluation produce **byte-identical results**. First run: 17 passes, 12 failures,
-11 skips. After `@variants` and `@targeting` landed and the testbed grew targeting support: **31
-passes, 2 failures, 19 skips out of 52**, including all four evaluation-context and targeting
-scenarios. The comparison was the main reason for running both modes -- Flagsmith's
-engine is reimplemented per language, Python in the Edge Proxy and Go in
-`flagsmith-go-client/flagengine` -- and on the canonical set they do not diverge at all.
+Remote and local evaluation produce **byte-identical results** -- same passes, same failures, same
+skips, same reasons -- at every revision the suite has been run at:
+
+| when | result |
+| --- | --- |
+| first run, 40 scenarios | 17 pass, 12 fail, 11 skip |
+| after `@variants` and `@targeting`, 52 scenarios | 31 pass, 2 fail, 19 skip |
+| **current, 56 scenarios** | **35 pass, 2 fail, 19 skip** |
+
+The comparison was the main reason for running both modes: Flagsmith's engine is reimplemented per
+language, Python in the Edge Proxy and Go in `flagsmith-go-client/flagengine`, so a byte-identical
+environment document is evaluated by two independent implementations. On the canonical set they do
+not diverge at all.
 
 Recorded because a negative result from a test designed to find divergence is worth as much as a
-positive one, and because it will be worth re-running when Java and JS adoptions exist.
+positive one. It is now the *only* language where both modes were compared: Java, JS and Python all
+run remote evaluation only, so the agreement rests on Go alone.
 
-## 14. Local evaluation has a startup race the provider cannot close — *runtime*
+## 13. Local evaluation has a startup race the provider cannot close — *runtime*
 
 In local-evaluation mode the client fetches the environment document on a background poll. The
 provider implements no `openfeature.StateHandler`, so it has no `Init` in which to block, and the
@@ -206,7 +214,7 @@ flag. A conformant provider would block in `Init`. The adoption cannot fix it an
 first sync before handing the provider back, which is why the suite is deterministic rather than
 flaky -- the underlying defect is unchanged.
 
-## 15. `updated_at` must carry a timezone, and only one consumer enforces it — *runtime, our bug*
+## 14. `updated_at` must carry a timezone, and only one consumer enforces it — *runtime, our bug*
 
 Fixed here, recorded because the failure mode was misleading. The launchpad first emitted
 `updated_at` as a naive ISO timestamp. The Edge Proxy's Python accepted it happily
@@ -219,7 +227,7 @@ Django REST Framework emits a timezone, so real Flagsmith would not have hit thi
 part is that the two reference consumers of the same document disagree about how strict the format
 is, and only the stricter one tells you.
 
-## 17. Targeting works, via identity overrides — *runtime*
+## 15. Targeting works, via identity overrides — *runtime*
 
 The canonical set gained `targeting-key-flag`, whose rule is specified by behaviour rather than
 syntax: resolve `hit` when the targeting key is a given uuid, `miss` otherwise.
@@ -237,7 +245,45 @@ targeting flag with no rule would make the non-matching-context scenario pass fo
 All four scenarios pass in both evaluation modes, so the Python engine in the proxy and the Go
 engine in the SDK agree on identity overrides too.
 
-## 16. Open — still unsettled
+## 16. `state: DISABLED` maps straight onto Flagsmith, and splits the four providers — *runtime*
+
+The canonical set grew four `disabled-*` flags gated behind `@disabled-flags`. The mapping is
+unusually direct, because Flagsmith models a feature state as `enabled` plus `feature_state_value`
+-- exactly the pair `state` and `defaultVariant` describe. The configured values are kept intact, so
+a provider that ignores the state is caught by the value it returns rather than by an absence.
+
+What the four providers then do with it splits them two-two:
+
+- **Go and Java** return the caller default with reason `DISABLED` and no error code, which is what
+  the tag asserts. Both declare the capability and pass.
+- **Python and JS** raise `GENERAL`. Neither configuration satisfies the scenario:
+  `return_value_for_disabled_flags` / `returnValueForDisabledFlags` defaults false and raises, and
+  setting it true returns the flag's *configured* value instead of the caller default -- which the
+  scenario also catches. Both withhold the capability with a deviation.
+
+This is the same two-two split as the boolean default (#18), but along a different line: there it is
+Go+Java against Python+JS on what a boolean flag *is*; here it is the same pairing on what a
+disabled flag *returns*.
+
+## 17. Four languages, one backend — *runtime*
+
+All four adoptions run against this image, through the same control API, and **the testbed needed no
+changes for any of them** beyond serving the canonical set. Current results, all of 56 scenarios:
+
+| | Go | Python | Java | JS |
+| --- | ---: | ---: | ---: | ---: |
+| passed | **35** | **28** | **24** | **19** |
+| failed | **2** | **5** | **12** | **14** |
+| skipped | 19 | 23 | 20 | 23 |
+
+Go's 2 are the shared type-system pair (#11). Python's 5 add an unreadable float and a boolean
+satisfying an Integer request. Java's 12 are eight `reason` nulls plus two unreadable floats. JS's 14
+are ten unconditional `TARGETING_MATCH` reasons plus four stringified wrong-type successes.
+
+The reasons barely overlap, which is the point: four providers for one product, written by different
+people against one API, and per-language quality is invisible without measuring it this way.
+
+## 18. Open — still unsettled
 
 - Do the Java, JS, PHP and Ruby Flagsmith providers share #2, #4, #5 and #11? All five are
   hand-written against the same API, so divergence is likely and is the highest-value thing a

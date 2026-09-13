@@ -2,12 +2,23 @@
 
 A provider-TCK backend for **Flagsmith**, built on the Flagsmith **Edge Proxy**.
 
-Status: **working prototype, 2026-09-12.** Scratch repo, no permanent home.
+Status: **working prototype, 2026-09-13.** Scratch repo, no permanent home. Image tagged `0.1.0`.
 
-Every control-API operation is implemented and verified against a running container, and the Go
-provider has now been driven through it end to end:
-[go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959) (draft) reports
-**31 passed, 2 failed, 19 skipped out of 52**, identical in both evaluation modes.
+Every control-API operation is implemented and verified against a running container, and **four
+language providers have now been driven through it end to end** — all against this one image,
+through the same control API, with no testbed changes for any of them. Out of 56 scenarios:
+
+| | Go | Python | Java | JS |
+| --- | ---: | ---: | ---: | ---: |
+| passed | **35** | **28** | **24** | **19** |
+| failed | **2** | **5** | **12** | **14** |
+| skipped | 19 | 23 | 20 | 23 |
+
+Draft PRs: [go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959) (both
+evaluation modes, byte-identical),
+[java-sdk-contrib#1849](https://github.com/open-feature/java-sdk-contrib/pull/1849),
+[js-sdk-contrib#1623](https://github.com/open-feature/js-sdk-contrib/pull/1623),
+[Flagsmith#40](https://github.com/Flagsmith/flagsmith-openfeature-provider-python/pull/40).
 
 See [FINDINGS.md](FINDINGS.md) for what reading the source turned up before any adoption ran.
 
@@ -246,25 +257,32 @@ supplied.
 
 ## Measured capability declarations
 
-No longer predictions. From [go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959),
-identical in both modes:
+No longer predictions. Identical across both of Go's evaluation modes; the other three run remote
+only.
 
-| | `@object` | `@large-integers` | `@targeting` | `@variants` | `@events` | `@lifecycle` | `@stale` | `@configuration-change` | `@unavailable` | `@numeric-coercion` |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Go, remote | yes | yes | yes | no | no | no | no | no | no | no |
-| Go, local | yes | yes | yes | no | no | no | no | no | no | no |
+| | `@object` | `@large-integers` | `@targeting` | `@disabled-flags` | `@variants` | `@events` | `@lifecycle` | `@stale` | `@configuration-change` | `@unavailable` | `@numeric-coercion` |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Go | yes | yes | yes | yes | no | no | no | no | no | no | no |
+| Java | yes | no | yes | yes | no | no | no | no | no | no | no |
+| Python | yes | yes | yes | no | no | no | no | no | no | no | no |
+| JS | yes | yes | yes | no | no | no | no | no | no | no | no |
 
-Most of the `no`s come from one fact: the Go provider implements none of `Init`, `Shutdown`,
-`Status` or `EventChannel`, so it is neither a `StateHandler` nor an `EventHandler` and has no
-observable lifecycle to assert against. Declaring those would make the scenarios pass without the
-provider doing anything, which is worse than a skip.
+Most of the `no`s come from one fact: no Flagsmith provider implements an observable initialisation
+or emits events, so there is no lifecycle to assert against. Declaring those would make the
+scenarios pass without the provider doing anything, which is worse than a skip.
 
-`@variants` is withheld because Flagsmith has no variant concept for a plain feature (FINDINGS #11).
-That is permitted rather than defective -- 2.2.4 makes the variant a SHOULD -- so it carries no
-deviation entry. This testbed's first run is what produced that capability.
+`@large-integers` is withheld by Java alone, and correctly — its integer accessor is a 32-bit
+`Integer`, so 2^53-1 cannot be asked for at all. That is a property of the **SDK**, not the provider.
 
-`@numeric-coercion` is the one withheld because of an actual defect, and carries a deviation entry
-(FINDINGS #2).
+`@variants` is withheld by all four because Flagsmith has no variant concept for a plain feature
+(FINDINGS #10). Permitted rather than defective — 2.2.4 makes the variant a SHOULD — so it carries
+no deviation entry anywhere.
+
+`@disabled-flags` splits them two-two (FINDINGS #16): Go and Java return the caller default with
+reason `DISABLED` and pass; Python and JS raise `GENERAL` and withhold it with a deviation.
+
+`@numeric-coercion` is withheld by all four because of an actual defect, and carries a deviation in
+each (FINDINGS #2, #9).
 
 ## Not done
 
@@ -273,7 +291,7 @@ deviation entry. This testbed's first run is what produced that capability.
   on it. This is the next thing to fix.
 - **Only Go's provider has been driven through it.** Java, JS, PHP and Ruby are hand-written against
   the same API; divergence between them is the highest-value thing a further adoption could surface.
-  FINDINGS #13 says the two Go paths agree exactly; it says nothing about the others.
+  FINDINGS #12 says the two Go paths agree exactly; it says nothing about the others.
 - **`/change`, `/restart` and `/reset` are observed by nothing.** They work and are verified by CI,
   but the Go adoption declares no event or lifecycle capability, so no scenario drives them. They
   are there for a provider that implements `StateHandler`.
@@ -283,4 +301,4 @@ deviation entry. This testbed's first run is what produced that capability.
 - **Only the `default` configuration exists.**
 - **Two scenarios fail and are not solvable here** -- reading `float-flag` or `object-flag` as a
   string succeeds where the suite wants `TYPE_MISMATCH`, because Flagsmith stores both as strings.
-  See FINDINGS #12; it needs a decision upstream, not a change in this repo.
+  See FINDINGS #11; it needs a decision upstream, not a change in this repo.
