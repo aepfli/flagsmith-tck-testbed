@@ -8,11 +8,7 @@ Every control-API operation is implemented and verified against a running contai
 language providers have now been driven through it end to end** — all against this one image,
 through the same control API, with no testbed changes for any of them. Out of 56 scenarios:
 
-| | Go | Python | Java | JS |
-| --- | ---: | ---: | ---: | ---: |
-| passed | **35** | **28** | **24** | **19** |
-| failed | **2** | **5** | **12** | **14** |
-| skipped | 19 | 23 | 20 | 23 |
+The current numbers are below, under [Current results](#current-results).
 
 Draft PRs: [go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959) (both
 evaluation modes, byte-identical),
@@ -233,17 +229,34 @@ and what it verified, is [FINDINGS #15](FINDINGS.md).
 ## Measured capability declarations
 
 No longer predictions. Identical across both of Go's evaluation modes; the other three run remote
-only.
+only. A declared capability whose scenarios fail is the preferred shape, so several `yes` entries
+below are capabilities the provider gets wrong — the failure is in the results with a deviation
+attached rather than hidden as a skip.
 
-| | `@object` | `@large-integers` | `@targeting` | `@disabled-flags` | `@variants` | `@events` | `@lifecycle` | `@stale` | `@configuration-change` | `@unavailable` | `@numeric-coercion` |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Go | yes | yes | yes | yes | no | no | no | no | no | no | no |
-| Java | yes | no | yes | yes | no | no | no | no | no | no | no |
-| Python | yes | yes | yes | no | no | no | no | no | no | no | no |
-| JS | yes | yes | yes | no | no | no | no | no | no | no | no |
+| | `@object` | `@large-integers` | `@targeting` | `@disabled-flags` | `@standard-reasons` | `@numeric-coercion` | `@variants` | lifecycle & events |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Go | yes | yes | yes | yes | yes¹ | yes¹ | no | no |
+| Java | yes | refused² | yes | yes | yes¹ | yes¹ | no | no |
+| Python | yes | yes | yes | yes¹ | — ³ | yes¹ | no | no |
+| JS | yes | yes | yes | yes¹ | yes¹ | refused⁴ | no | no |
+
+¹ declared and failing, with a deviation.
+² the Java SDK's integer accessor is 32-bit, so 2^53-1 cannot be asked at all — the TCK refuses it.
+³ Python's TCK has not shipped this capability yet.
+⁴ JavaScript has one numeric type, so the question is not expressible — the TCK refuses it.
 
 Why each absence is what it is — a decline, a defect, or something the SDK cannot express — is
 [FINDINGS](FINDINGS.md) #5, #10 and #16 rather than repeated here.
+
+## Current results
+
+All four adoptions, 65 scenarios each:
+
+| | Go | Python | Java | JS |
+| --- | ---: | ---: | ---: | ---: |
+| passed | **45** | 29 | 35 | 31 |
+| failed | **4** | 11 | 13 | 15 |
+| skipped | 16 | 25 | 17 | 19 |
 
 ## Not done
 
