@@ -132,24 +132,13 @@ false — but a client key would filter both, so adoptions should use the server
 
 ## Two adoption modes, one testbed
 
-The proxy serves a complete environment document, not just evaluated flags. So both Flagsmith
-evaluation modes can point at this testbed:
-
-- **Remote evaluation** — the provider calls `/api/v1/flags/`; the **Edge Proxy's Python engine**
-  evaluates.
-- **Local evaluation** — the provider fetches `/api/v1/environment-document/` and evaluates
-  in-process with **its own language's engine**.
-
-That second mode is worth more than it looks. Flagsmith's engine is independently reimplemented per
-language (Python in the proxy, Go in `flagsmith-go-client/flagengine`, and so on), so running both
-modes against a byte-identical document compares those implementations directly. It is the same
-shape as the GO Feature Flag case — where one engine runs as a Go module in Go and as a WASM build
-in Java and JS — except here they are separate reimplementations, which makes divergence more
-likely, not less.
+The proxy serves a complete environment document, not just evaluated flags, so both Flagsmith
+evaluation modes can point here: **remote**, where the proxy's Python engine evaluates, and
+**local**, where the provider's own language engine does. Why that comparison is worth making, and
+what it found, is [FINDINGS #12](FINDINGS.md).
 
 **Caveat:** SDKs request `/api/v1/environment-document/` *with* a trailing slash; FastAPI answers
-`307` to the slashless route. Any client that follows redirects (Go's `http.Client` does for GET)
-is fine. Verified: `307 -> 200`.
+`307` to the slashless route, so the client must follow redirects. Verified: `307 -> 200`.
 
 ## Connection parameters for an adoption
 
@@ -237,23 +226,9 @@ Falsy values survive, and 2^53-1 is exact.
 
 ### Targeting is seeded as an identity override
 
-`targeting-key-flag` is the one canonical flag with a rule, and the canonical set specifies it by
-behaviour rather than syntax: resolve `hit` when the targeting key is a given uuid, `miss`
-otherwise, expressed however the backend expresses targeting.
-
-Flagsmith's native encoding is an **identity override**. A targeting key *is* a Flagsmith
-identifier -- the provider calls `GetIdentityFlags(targetingKey)` whenever one is present -- so the
-launchpad seeds the rule into the environment document's `identity_overrides`, keyed by that uuid
-and overriding the one feature. Segments would be the wrong tool: they match on traits, and the
-canonical rule has none.
-
-The launchpad parses the rule's JsonLogic narrowly rather than implementing JsonLogic. An
-unrecognised shape is an **error**, not a silent skip -- seeding a targeting flag with no rule would
-make the non-matching-context scenario pass for the wrong reason.
-
-Verified through the real engine, in both modes: no context and a non-matching key both resolve
-`miss`, the matching key resolves `hit`, and `string-flag` still resolves `hi` when a context is
-supplied.
+`targeting-key-flag` is the one canonical flag with a rule. Flagsmith's native encoding for it is an
+**identity override**, keyed by the targeting key — which *is* a Flagsmith identifier. The reasoning,
+and what it verified, is [FINDINGS #15](FINDINGS.md).
 
 ## Measured capability declarations
 
@@ -267,22 +242,8 @@ only.
 | Python | yes | yes | yes | no | no | no | no | no | no | no | no |
 | JS | yes | yes | yes | no | no | no | no | no | no | no | no |
 
-Most of the `no`s come from one fact: no Flagsmith provider implements an observable initialisation
-or emits events, so there is no lifecycle to assert against. Declaring those would make the
-scenarios pass without the provider doing anything, which is worse than a skip.
-
-`@large-integers` is withheld by Java alone, and correctly — its integer accessor is a 32-bit
-`Integer`, so 2^53-1 cannot be asked for at all. That is a property of the **SDK**, not the provider.
-
-`@variants` is withheld by all four because Flagsmith has no variant concept for a plain feature
-(FINDINGS #10). Permitted rather than defective — 2.2.4 makes the variant a SHOULD — so it carries
-no deviation entry anywhere.
-
-`@disabled-flags` splits them two-two (FINDINGS #16): Go and Java return the caller default with
-reason `DISABLED` and pass; Python and JS raise `GENERAL` and withhold it with a deviation.
-
-`@numeric-coercion` is withheld by all four because of an actual defect, and carries a deviation in
-each (FINDINGS #2, #9).
+Why each absence is what it is — a decline, a defect, or something the SDK cannot express — is
+[FINDINGS](FINDINGS.md) #5, #10 and #16 rather than repeated here.
 
 ## Not done
 
