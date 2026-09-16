@@ -233,19 +233,29 @@ only. A declared capability whose scenarios fail is the preferred shape, so seve
 below are capabilities the provider gets wrong — the failure is in the results with a deviation
 attached rather than hidden as a skip.
 
-| | `@object` | `@large-integers` | `@targeting` | `@disabled-flags` | `@standard-reasons` | `@numeric-coercion` | `@variants` | lifecycle & events |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Go | yes | yes | yes | yes | yes¹ | yes¹ | no | no |
-| Java | yes | refused² | yes | yes | yes¹ | yes¹ | no | no |
-| Python | yes | yes | yes | yes¹ | — ³ | yes¹ | no | no |
-| JS | yes | yes | yes | yes¹ | yes¹ | refused⁴ | no | no |
+| | `@object` | `@large-integers` | `@targeting` | `@disabled-flags` | `@standard-reasons` | `@numeric-coercion` | `@string-typing` | `@variants` | lifecycle & events |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Go | yes | yes | yes | yes | yes¹ | yes¹ | no | no | no |
+| Java | yes | refused² | yes | yes | yes¹ | yes¹ | no | no | no |
+| Python | yes | yes | yes | yes¹ | — ³ | yes¹ | — ³ | no | no |
+| JS | yes | yes | yes | yes¹ | yes¹ | refused⁴ | no | no | no |
 
 ¹ declared and failing, with a deviation.
 ² the Java SDK's integer accessor is 32-bit, so 2^53-1 cannot be asked at all — the TCK refuses it.
-³ Python's TCK has not shipped this capability yet.
+³ not shipped in Python's TCK yet.
 ⁴ JavaScript has one numeric type, so the question is not expressible — the TCK refuses it.
 
-Why each absence is what it is — a decline, a defect, or something the SDK cannot express — is
+**`@string-typing` is withheld by all four**, and for the same backend reason: Flagsmith has no float
+type and no object type, so `float-flag` and `object-flag` genuinely *are* strings here and asking
+for them as strings is a correct request rather than a type mismatch. It is a permitted absence, not
+a defect, so it carries no deviation anywhere — the capability exists precisely so this is a skip
+with a reason instead of a mandatory failure with an excuse.
+
+That does hide one real defect in the JavaScript provider, which stringifies a value of *any* type
+rather than only the ones the backend stores as strings. That belongs in an issue against the
+provider rather than in the suite's results — see [FINDINGS](FINDINGS.md).
+
+Why each other absence is what it is — a decline, a defect, or something the SDK cannot express — is
 [FINDINGS](FINDINGS.md) #5, #10 and #16 rather than repeated here.
 
 ## Current results
@@ -254,9 +264,9 @@ All four adoptions, 65 scenarios each:
 
 | | Go | Python | Java | JS |
 | --- | ---: | ---: | ---: | ---: |
-| passed | **45** | 29 | 35 | 31 |
-| failed | **4** | 11 | 13 | 15 |
-| skipped | 16 | 25 | 17 | 19 |
+| passed | **43** | 29 | 33 | 31 |
+| failed | **2** | 11 | 11 | 11 |
+| skipped | 20 | 25 | 21 | 23 |
 
 ## Not done
 
