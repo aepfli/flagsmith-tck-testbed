@@ -6,9 +6,8 @@ Status: **working prototype, 2026-09-13.** Scratch repo, no permanent home. Imag
 
 Every control-API operation is implemented and verified against a running container, and **four
 language providers have now been driven through it end to end** — all against this one image,
-through the same control API, with no testbed changes for any of them. Out of 56 scenarios:
-
-The current numbers are below, under [Current results](#current-results).
+through the same control API, with no testbed changes for any of them. The numbers are below, under
+[Current results](#current-results).
 
 Draft PRs: [go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959) (both
 evaluation modes, byte-identical),
