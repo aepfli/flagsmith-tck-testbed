@@ -1,64 +1,24 @@
 # flagsmith-tck-testbed
 
-A provider-TCK backend for **Flagsmith**, built on the Flagsmith **Edge Proxy**.
+A backend for the OpenFeature provider conformance suite (TCK,
+[open-feature/spec#417](https://github.com/open-feature/spec/issues/417), Appendix F), standing in
+for Flagsmith, built on the Flagsmith **Edge Proxy**. Image `ghcr.io/aepfli/flagsmith-tck-testbed`. Scratch repo, no permanent home yet.
 
 > **Fake the config source, never the evaluation.** The Edge Proxy runs Flagsmith's own
 > `flag_engine` over a real environment document; only the *delivery* of that document is synthetic
 > — a launchpad serves `GET /api/v1/environment-document/` in place of the Flagsmith API, and the
 > TCK's control API alongside it.
 
-Image `ghcr.io/aepfli/flagsmith-tck-testbed:0.1.0`. Scratch repo, no permanent home yet.
+## How it works
 
-## What four providers do with it
-
-65 scenarios each, one image, one control API, no testbed changes for any of them.
-
-| | Go | Python | Java | JS |
-| --- | ---: | ---: | ---: | ---: |
-| passed | **45** | 29 | 35 | 31 |
-| failed | **2** | 11 | 11 | 13 |
-| skipped | 18 | 25 | 19 | 21 |
-
-Draft PRs: [go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959) (both
-evaluation modes, byte-identical), [java-sdk-contrib#1849](https://github.com/open-feature/java-sdk-contrib/pull/1849),
-[js-sdk-contrib#1623](https://github.com/open-feature/js-sdk-contrib/pull/1623),
-[Flagsmith#40](https://github.com/Flagsmith/flagsmith-openfeature-provider-python/pull/40).
-
-### What works, and what does not
-
-✅ works · ❌ defect · ⊘ not asked (capability withheld or refused)
-
-| | Go | Python | Java | JS |
-| --- | :-: | :-: | :-: | :-: |
-| Boolean / String / Integer resolution | ✅ | ✅ | ✅ | ✅ |
-| **Float resolution** | ✅ | ❌ | ❌ | ❌ |
-| Object resolution | ✅ | ✅ | ✅ | ✅ |
-| Falsy values (`false`, `0`, `""`) | ✅ | ✅ | ✅ | ✅ |
-| 2^31−1 exact | ✅ | ✅ | ✅ | ✅ |
-| 2^53−1 exact | ✅ | ✅ | ⊘ 32-bit accessor | ✅ |
-| `FLAG_NOT_FOUND` | ✅ | ✅ | ✅ | ✅ |
-| Type mismatch, non-string | ✅ | ❌ `bool` is an `int` | ✅ | ✅ |
-| **Bool/int as String → mismatch** | ✅ | ⊘ | ✅ | ❌ stringifies |
-| Float/object as String | ⊘ | ⊘ | ⊘ | ⊘ |
-| **Resolution `reason`** | ❌ targeting | ✅ | ❌ null | ❌ always targeting |
-| Targeting | ✅ | ✅ | ✅ | ✅ |
-| **Disabled flags** | ✅ | ❌ `GENERAL` | ✅ | ❌ `GENERAL` |
-| Numeric coercion | ❌ | ❌ | ❌ | ⊘ one numeric type |
-| Variants | ⊘ | ⊘ | ⊘ | ⊘ |
-| Lifecycle / events | ⊘ | ⊘ | ⊘ | ⊘ |
-
-The ⊘ rows are permitted absences, not gaps: Flagsmith names no variant, stores floats and objects
-as text, and no provider implements `StateHandler`. Reasoning for each is in
-[FINDINGS.md](FINDINGS.md); the defects are catalogued in
-[flagsmith-tck-findings](https://github.com/aepfli/flagsmith-tck-testbed).
-
-**The recurring split is Go+Java against Python+JS**, on two unrelated axes — what a boolean flag
-*is*, and what a disabled flag returns.
+The launchpad is PID 1 and listens on `:8080`. It serves the TCK control API and
+`GET /api/v1/environment-document/`. It supervises the Edge Proxy on `:8000`, which polls that
+document in place of the Flagsmith API. Providers talk to the proxy.
 
 ## Run it
 
 ```bash
-docker run -d -P ghcr.io/aepfli/flagsmith-tck-testbed:0.1.0
+docker run -d -P ghcr.io/aepfli/flagsmith-tck-testbed:latest
 ```
 
 Boots into the `default` configuration, so it serves the canonical set without an explicit `/start`.
@@ -79,7 +39,7 @@ Adoptions point a compose file at it and let the TCK own the stack. Ports are ne
 | Client-side key | `provider-tck-client-key` |
 
 The keys are fixed because the control API has no way to hand connection parameters to a provider
-(FINDINGS #1).
+([FINDINGS.md](FINDINGS.md) #1).
 
 ## What it serves
 
@@ -89,13 +49,13 @@ which is what `FLAG_NOT_FOUND` rests on.
 
 **Launchpad** (`:8080`) — `POST /start /stop /restart /change /reset`, `GET /healthz`.
 
-| Op | Behaviour | Verified |
-| --- | --- | --- |
-| `/start?config=` | rebuild from the canonical set, **probe a real evaluation before returning** | 992ms |
-| `/stop` | kill the proxy; container and control API stay up | evaluation refused, container alive |
-| `/restart?seconds=` | kill, sleep, restart; **flag state preserved** | 2671ms at `seconds=2` |
-| `/change` | flip `changing-flag`, poll until served | 472–987ms |
-| `/reset` | restore baseline, **no process restart** | 994ms |
+| Op | Behaviour |
+| --- | --- |
+| `/start?config=` | rebuild from the canonical set, **probe a real evaluation before returning** |
+| `/stop` | kill the proxy; container and control API stay up |
+| `/restart?seconds=` | kill, sleep, restart; **flag state preserved** |
+| `/change` | flip `changing-flag`, poll until served |
+| `/reset` | restore baseline, **no process restart** |
 
 Two things that look like bugs and are not:
 
@@ -124,13 +84,26 @@ is an unusually direct fit. Two subtleties:
 `targeting-key-flag` is seeded as an **identity override**: a targeting key *is* a Flagsmith
 identifier. Segments would be wrong — they match on traits, and the canonical rule has none.
 
-## Not done
+## Adopting it
 
-- **No published home.** The image sits in a personal namespace, which is the one reason all four
-  PRs are drafts.
-- **Only Go runs both evaluation modes.** Its byte-identical remote/local result rests on Go alone.
-- **`/change`, `/restart` and `/reset` are observed by nothing** — no provider declares an event or
-  lifecycle capability. They work, and CI proves it, but no scenario drives them.
-- **No segments**, so segment evaluation is entirely untested. Fine for the TCK.
-- **No Postgres, no Django**, so this does not prove the control API survives a database-backed
-  vendor stack — which was the full Flagsmith stack's unique contribution.
+Point the provider's TCK compose file at the image, use the fixed server-side key, and let the TCK
+own the stack. The language TCKs show how:
+[java-sdk-contrib#1849](https://github.com/open-feature/java-sdk-contrib/pull/1849),
+[go-sdk-contrib#959](https://github.com/open-feature/go-sdk-contrib/pull/959),
+[js-sdk-contrib#1623](https://github.com/open-feature/js-sdk-contrib/pull/1623),
+[Flagsmith#40](https://github.com/Flagsmith/flagsmith-openfeature-provider-python/pull/40).
+
+## Versioning
+
+`version.txt` holds the current version. A `v*` tag publishes `X.Y.Z` and `X.Y`; every push to
+`main` publishes `latest` and a `sha-` tag. Pull requests build and smoke-test but never push.
+
+## Limits
+
+- No segments, so segment evaluation is untested.
+- No Postgres, no Django, so it does not show the control API surviving a database-backed vendor
+  stack.
+- `/change`, `/restart` and `/reset` work and CI checks them, but no provider declares an event or
+  lifecycle capability, so no scenario drives them.
+
+Findings from running the suite against it: [FINDINGS.md](FINDINGS.md).
